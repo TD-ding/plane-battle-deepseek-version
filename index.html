@@ -268,6 +268,18 @@ class Game {
       speed, score, color, alive: true,
       cooldown: 0, fireRate: Math.max(30, fireRate),
       moveTimer: 0, movePhase: rnd(0, Math.PI * 2),
+      isBoss: false,
+    };
+  }
+
+  createBoss() {
+    const hp = 30 + this.level * 15;
+    return {
+      x: W / 2 - 40, y: -80, w: 80, h: 60, type: 'boss', hp, maxHp: hp,
+      speed: 0.8, score: 2000 + this.level * 500, color: '#f0f', alive: true,
+      cooldown: 0, fireRate: Math.max(20, 50 - this.level * 5),
+      moveTimer: 0, movePhase: rnd(0, Math.PI * 2),
+      isBoss: true, phase: 0, phaseTimer: 0,
     };
   }
 
@@ -310,14 +322,37 @@ class Game {
     for (const e of this.enemies) {
       if (!e.alive) continue;
       e.moveTimer += 0.03;
-      e.y += e.speed;
-      if (e.type === 'small') e.x += Math.sin(e.movePhase + e.moveTimer * 3) * 1.5;
-      if (e.cooldown > 0) e.cooldown--;
-      if (e.fireRate > 0 && e.y > 30 && e.cooldown <= 0) {
-        e.cooldown = e.fireRate;
-        this.enemyBullets.push({ x: e.x + e.w / 2 - 2, y: e.y + e.h, w: 4, h: 8, speed: CFG.ENEMY_BULLET_SPEED, alive: true });
+      if (e.isBoss) {
+        // Boss AI: move to position, then sweep
+        if (e.y < 60) {
+          e.y += e.speed;
+        } else {
+          e.x += Math.sin(e.moveTimer * 2) * 2;
+        }
+        // Boss fires spread shots
+        if (e.cooldown > 0) e.cooldown--;
+        if (e.y >= 60 && e.cooldown <= 0) {
+          e.cooldown = e.fireRate;
+          e.phaseTimer++;
+          if (e.phaseTimer % 3 === 0) {
+            // Spread shot
+            for (let i = -1; i <= 1; i++) {
+              this.enemyBullets.push({ x: e.x + e.w / 2 - 2, y: e.y + e.h, w: 4, h: 8, speed: CFG.ENEMY_BULLET_SPEED, alive: true, dx: i * 1.5 });
+            }
+          } else {
+            this.enemyBullets.push({ x: e.x + e.w / 2 - 2, y: e.y + e.h, w: 4, h: 8, speed: CFG.ENEMY_BULLET_SPEED, alive: true, dx: 0 });
+          }
+        }
+      } else {
+        e.y += e.speed;
+        if (e.type === 'small') e.x += Math.sin(e.movePhase + e.moveTimer * 3) * 1.5;
+        if (e.cooldown > 0) e.cooldown--;
+        if (e.fireRate > 0 && e.y > 30 && e.cooldown <= 0) {
+          e.cooldown = e.fireRate;
+          this.enemyBullets.push({ x: e.x + e.w / 2 - 2, y: e.y + e.h, w: 4, h: 8, speed: CFG.ENEMY_BULLET_SPEED, alive: true, dx: 0 });
+        }
+        if (e.y > H + 50) e.alive = false;
       }
-      if (e.y > H + 50) e.alive = false;
     }
   }
 
@@ -339,7 +374,7 @@ class Game {
             this.score += e.score;
             this.killsInLevel++;
             this.sounds.explode();
-            this.addExplosion(e.x + e.w / 2, e.y + e.h / 2, e.type === 'big' ? 'big' : 'med');
+            this.addExplosion(e.x + e.w / 2, e.y + e.h / 2, (e.type === 'big' || e.isBoss) ? 'big' : 'med');
             this.spawnPowerup(e.x + e.w / 2, e.y + e.h / 2);
           }
           break;
@@ -352,7 +387,8 @@ class Game {
     for (const b of this.enemyBullets) {
       if (!b.alive) continue;
       b.y += b.speed;
-      if (b.y > H + 20) { b.alive = false; continue; }
+      b.x += (b.dx || 0);
+      if (b.y > H + 20 || b.x < -20 || b.x > W + 20) { b.alive = false; continue; }
       if (rectHit(b, this.player)) {
         b.alive = false;
         if (this.player.shieldTimer <= 0) {
@@ -410,7 +446,13 @@ class Game {
     const interval = Math.max(15, CFG.SPAWN_INTERVAL - this.level * 4);
     if (this.spawnTimer >= interval) {
       this.spawnTimer = 0;
-      this.enemies.push(this.createEnemy());
+      // Boss every 2 levels after level 2
+      const hasBoss = this.enemies.some(e => e.isBoss);
+      if (!hasBoss && this.level >= 2 && this.killsInLevel === Math.floor(this.killsToLevel / 2)) {
+        this.enemies.push(this.createBoss());
+      } else {
+        this.enemies.push(this.createEnemy());
+      }
     }
 
     this.updateEnemies();
@@ -569,7 +611,47 @@ class Game {
       ctx.fillStyle = e.color;
       ctx.save();
       ctx.translate(e.x + e.w / 2, e.y + e.h / 2);
-      if (e.type === 'small') {
+      if (e.isBoss) {
+        // Boss: large hexagon with inner details
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = Math.PI / 3 * i - Math.PI / 2;
+          const r = e.w / 2;
+          ctx[i === 0 ? 'moveTo' : 'lineTo'](Math.cos(angle) * r, Math.sin(angle) * r);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = Math.PI / 3 * i - Math.PI / 2;
+          const r = e.w / 2 - 6;
+          ctx[i === 0 ? 'moveTo' : 'lineTo'](Math.cos(angle) * r, Math.sin(angle) * r);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#f0f';
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = Math.PI / 3 * i - Math.PI / 2;
+          const r = e.w / 2 - 12;
+          ctx[i === 0 ? 'moveTo' : 'lineTo'](Math.cos(angle) * r, Math.sin(angle) * r);
+        }
+        ctx.closePath();
+        ctx.fill();
+        // Boss warning glow
+        const glow = 0.3 + 0.3 * Math.sin(this.frameCount * 0.15);
+        ctx.strokeStyle = `rgba(255, 0, 255, ${glow})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = Math.PI / 3 * i - Math.PI / 2;
+          const r = e.w / 2 + 4;
+          ctx[i === 0 ? 'moveTo' : 'lineTo'](Math.cos(angle) * r, Math.sin(angle) * r);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      } else if (e.type === 'small') {
         ctx.beginPath();
         ctx.moveTo(0, e.h / 2);
         ctx.lineTo(-e.w / 2, -e.h / 2);
