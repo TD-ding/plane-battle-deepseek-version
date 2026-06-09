@@ -357,6 +357,20 @@ class Game {
   }
 
   updateBullets() {
+    // Player bullets vs enemy bullets (cancel each other)
+    for (const b of this.bullets) {
+      if (!b.alive) continue;
+      for (const eb of this.enemyBullets) {
+        if (!eb.alive) continue;
+        if (rectHit(b, eb)) {
+          b.alive = false;
+          eb.alive = false;
+          this.addExplosion((b.x + eb.x) / 2, (b.y + eb.y) / 2);
+          break;
+        }
+      }
+    }
+
     // Player bullets
     for (const b of this.bullets) {
       if (!b.alive) continue;
